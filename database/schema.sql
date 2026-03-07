@@ -657,6 +657,7 @@ Saves result to readiness_scores and returns breakdown.';
 -- -----------------------------------------------------------------
 -- PROCEDURE 2: Calculate Company Layoff Risk
 -- -----------------------------------------------------------------
+-- Fix calculate_layoff_risk function - rename variable to avoid ambiguity
 CREATE OR REPLACE FUNCTION calculate_layoff_risk(
     p_company_id INT
 )
@@ -669,7 +670,7 @@ RETURNS TABLE (
     recommendation      TEXT
 ) AS $$
 DECLARE
-    v_company_name      VARCHAR(150);
+    v_comp_name         VARCHAR(150);
     v_signal_count      BIGINT;
     v_avg_severity      DECIMAL(5,2);
     v_layoff_freq       DECIMAL(5,2);
@@ -682,24 +683,24 @@ DECLARE
     v_automation_score  DECIMAL(5,2);
     v_hiring_score      DECIMAL(5,2);
 BEGIN
-    -- Get company name
-    SELECT company_name INTO v_company_name
-    FROM companies WHERE company_id = p_company_id;
+    -- Get company name (renamed variable to v_comp_name)
+    SELECT c.company_name INTO v_comp_name
+    FROM companies c WHERE c.company_id = p_company_id;
 
     -- Get risk profile data
     SELECT 
-        layoff_frequency,
-        hiring_trend,
-        automation_impact
+        crp.layoff_frequency,
+        crp.hiring_trend,
+        crp.automation_impact
     INTO v_layoff_freq, v_hiring_trend, v_automation
-    FROM company_risk_profiles
-    WHERE company_id = p_company_id;
+    FROM company_risk_profiles crp
+    WHERE crp.company_id = p_company_id;
 
     -- Count and average risk signals
-    SELECT COUNT(*), COALESCE(AVG(severity_score), 0)
+    SELECT COUNT(*), COALESCE(AVG(rs.severity_score), 0)
     INTO v_signal_count, v_avg_severity
-    FROM risk_signals
-    WHERE company_id = p_company_id;
+    FROM risk_signals rs
+    WHERE rs.company_id = p_company_id;
 
     -- Convert hiring trend to numeric score
     v_hiring_score := CASE v_hiring_trend
@@ -719,8 +720,7 @@ BEGIN
         ELSE 33
     END;
 
-    -- RISK INDEX FORMULA:
-    -- Risk Index = (0.4 x Layoff_Freq) + (0.3 x Hiring_Score) + (0.3 x Automation)
+    -- RISK INDEX FORMULA
     v_risk_index := 
         (0.4 * LEAST(100, v_layoff_freq * 10)) +
         (0.3 * v_hiring_score) +
@@ -728,7 +728,7 @@ BEGIN
 
     v_stability := 100 - v_risk_index;
 
-    -- Risk level categorization
+    -- Risk level
     v_risk_level := CASE
         WHEN v_risk_index >= 75 THEN 'critical'
         WHEN v_risk_index >= 50 THEN 'high'
@@ -736,7 +736,7 @@ BEGIN
         ELSE 'low'
     END;
 
-    -- Recommendation for students
+    -- Recommendation
     v_recommendation := CASE
         WHEN v_risk_index >= 75 THEN 
             'HIGH RISK: Avoid applying. Company shows strong instability signals.'
@@ -748,16 +748,16 @@ BEGIN
             'SAFE: Company shows strong stability. Good choice.'
     END;
 
-    -- Update the stored risk profile
-    UPDATE company_risk_profiles
+    -- Update stored risk profile
+    UPDATE company_risk_profiles crp
     SET risk_index          = v_risk_index,
         stability_score     = v_stability,
         risk_level          = v_risk_level,
         last_calculated_at  = CURRENT_TIMESTAMP
-    WHERE company_id = p_company_id;
+    WHERE crp.company_id = p_company_id;
 
     RETURN QUERY SELECT
-        v_company_name::TEXT,
+        v_comp_name::TEXT,
         v_risk_index,
         v_risk_level::TEXT,
         v_stability,
